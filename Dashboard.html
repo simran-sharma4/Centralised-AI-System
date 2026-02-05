@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="container mt-4">
+<h1>Websites Dashboard</h1>
+<a href="/add" class="btn btn-primary mb-3">Add New Website</a>
+<a href="/history" class="btn btn-secondary mb-3">History & Logs</a>
+
+<table class="table table-striped">
+    <thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Currency</th><th>Ticket Size</th><th>Region</th></tr></thead>
+    <tbody>
+    {% for site in websites %}
+        <tr>
+            <td>{{ site.name }}</td>
+            <td>{{ site.url }}</td>
+            <td>{{ site.type }}</td>
+            <td>{{ site.currency }}</td>
+            <td>{{ site.ticket_size }}</td>
+            <td>{{ site.region }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h3>AI Command Panel</h3>
+{% if message %}<div class="alert alert-warning">{{ message }}</div>{% endif %}
+<form method="post">
+    <div class="input-group">
+        <input type="text" name="command" class="form-control" placeholder="e.g. Change currency of Website A to USD">
+        <button class="btn btn-success">Send</button>
+    </div>
+</form>
+</body>
+</html>
