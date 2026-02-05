@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head><title>Preview Changes</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="container">
+<h2>Preview Changes</h2>
+<table class="table">
+    <thead><tr><th>Website</th><th>Field</th><th>Old</th><th>New</th></tr></thead>
+    <tbody>
+    {% for c in changes %}
+        <tr><td>{{ c.site.name }}</td><td>Currency</td><td>{{ c.old_currency }}</td><td>{{ c.new_currency }}</td></tr>
+        <tr><td></td><td>Ticket Size</td><td>{{ c.old_price }}</td><td>{{ c.new_price }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+<a href="/apply" class="btn btn-success">Confirm & Apply</a>
+<a href="/cancel" class="btn btn-danger">Cancel</a>
+</body>
+</html>
