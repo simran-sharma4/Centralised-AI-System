@@ -1,157 +1,180 @@
-# pip install streamlit sqlite3 pandas forex-python
-
-import streamlit as st
-import sqlite3
-import pandas as pd
+# Web.py
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+from datetime import datetime
 import re
-from forex_python.converter import CurrencyRates  # For currency conversions
-import datetime
 
-conn = sqlite3.connect('web_management.db', check_same_thread=False)
-c = conn.cursor()
+app = Flask(__name__)
+app.secret_key = 'super_secret_key'  # change in production
 
-c.execute('''CREATE TABLE IF NOT EXISTS websites
-             (id INTEGER PRIMARY KEY, url TEXT, type TEXT, currency TEXT, pricing TEXT, region TEXT, language TEXT)''')
-c.execute('''CREATE TABLE IF NOT EXISTS changes
-             (id INTEGER PRIMARY KEY, timestamp TEXT, action TEXT, website_id INTEGER, old_value TEXT, new_value TEXT)''')
-conn.commit()
+# In-memory storage
+websites = []           # list of dicts
+website_id_counter = 1
+pending_changes = {}    # {website_id: {'currency': new, 'ticket_size': new}}
+history = []            # list of {'time':, 'command':, 'changes': [{website_id, old, new}]}
 
-def add_website(url, web_type, currency, pricing, region, lang):
-    c.execute("INSERT INTO websites (url, type, currency, pricing, region, language) VALUES (?, ?, ?, ?, ?, ?)",
-              (url, web_type, currency, pricing, region, lang))
-    conn.commit()
+# Simple exchange rates (USD base)
+rates = {
+    'INR': {'USD': 0.012, 'EUR': 0.011},
+    'USD': {'INR': 83.3, 'EUR': 0.92},
+    'EUR': {'INR': 90.9, 'USD': 1.09}
+}
 
-def get_all_websites():
-    df = pd.read_sql_query("SELECT * FROM websites", conn)
-    return df
+def get_rate(from_curr, to_curr):
+    if from_curr == to_curr:
+        return 1.0
+    return rates.get(from_curr, {}).get(to_curr, 1.0)
 
-def update_website(website_id, field, new_value):
-    old_value = pd.read_sql_query(f"SELECT {field} FROM websites WHERE id={website_id}", conn).iloc[0][0]
-    c.execute(f"UPDATE websites SET {field} = ? WHERE id = ?", (new_value, website_id))
-    conn.commit()
-    log_change(website_id, f"Updated {field}", old_value, new_value)
-
-def log_change(website_id, action, old_value, new_value):
-    timestamp = datetime.datetime.now().isoformat()
-    c.execute("INSERT INTO changes (timestamp, action, website_id, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
-              (timestamp, action, website_id, old_value, new_value))
-    conn.commit()
-
-def get_changes():
-    df = pd.read_sql_query("SELECT * FROM changes", conn)
-    return df
-
-def process_ai_command(command):
-    command = command.lower()
+# Home 
+@app.route('/', methods=['GET', 'POST'])
+def dashboard():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
     
-    match_currency = re.match(r"change currency of website (\d+) to (\w+)", command)
-    if match_currency:
-        website_id, new_currency = match_currency.groups()
-        try:
-            update_website(int(website_id), 'currency', new_currency.upper())
-            return f"Currency changed to {new_currency.upper()} for website {website_id}."
-        except:
-            return "Error: Invalid website ID."
-    
-    match_increase = re.match(r"increase ticket size by (\d+)% on all (\w+) websites", command)
-    if match_increase:
-        percent, web_type = match_increase.groups()
-        df = get_all_websites()
-        gaming_sites = df[df['type'] == web_type]
-        for idx, row in gaming_sites.iterrows():
-            try:
-                old_pricing = float(row['pricing'])
-                new_pricing = old_pricing * (1 + int(percent)/100)
-                update_website(row['id'], 'pricing', str(new_pricing))
-            except:
-                pass
-        return f"Pricing increased by {percent}% on all {web_type} websites."
-    
-    match_conversion = re.match(r"apply (\w+) to (\w+) conversion on selected websites", command)
-    if match_conversion:
-        from_curr, to_curr = match_conversion.groups()
-        cr = CurrencyRates()
-        rate = cr.get_rate(from_curr.upper(), to_curr.upper())
-   
-        df = get_all_websites()
-        for idx, row in df.iterrows():
-            if row['currency'] == from_curr.upper():
-                try:
-                    old_pricing = float(row['pricing'])
-                    new_pricing = old_pricing * rate
-                    update_website(row['id'], 'currency', to_curr.upper())
-                    update_website(row['id'], 'pricing', str(new_pricing))
-                except:
-                    pass
-        return f"Converted from {from_curr.upper()} to {to_curr.upper()} on applicable websites."
-    
-    if "preview" in command:
-        return "Preview: Simulated changes shown below (implement actual preview logic)."
-    
-    if "suggest" in command:
-        return "Suggestion: Based on region, recommend USD for US sites."
-    
-    return "Command not understood. Try examples like: 'Change currency of website 1 to USD'"
-
-st.title("Centralized AI-Powered Web Management System")
-
-st.sidebar.title("Menu")
-page = st.sidebar.radio("Go to", ["Dashboard", "Add Website", "AI Command Panel", "History & Logs"])
-
-if page == "Dashboard":
-    st.header("Dashboard")
-    df = get_all_websites()
-    if not df.empty:
-        st.dataframe(df)
-        for idx, row in df.iterrows():
-            st.write(f"**{row['url']}** - Status: Active")  # Simulate status
-    else:
-        st.write("No websites added yet.")
-
-elif page == "Add Website":
-    st.header("Add New Website")
-    with st.form(key='add_website'):
-        url = st.text_input("Website URL")
-        web_type = st.selectbox("Website Type", ["e-commerce", "ticketing", "gaming", "service-based"])
-        currency = st.selectbox("Current Currency", ["INR", "USD", "EUR"])
-        pricing = st.text_input("Ticket Size / Pricing (e.g., 100 or 'Basic:50,Premium:100')")
-        region = st.text_input("Region")
-        lang = st.text_input("Language")
-        submit = st.form_submit_button("Add")
-        if submit:
-            add_website(url, web_type, currency, pricing, region, lang)
-            st.success("Website added!")
-
-elif page == "AI Command Panel":
-    st.header("AI Command Panel")
-    command = st.text_area("Enter AI Command (e.g., 'Change currency of website 1 to USD')")
-    if st.button("Execute"):
+    message = None
+    if request.method == 'POST' and 'command' in request.form:
+        command = request.form['command'].strip()
         if command:
-            result = process_ai_command(command)
-            st.write("AI Response:", result)
-            # Simulate preview
-            st.write("Preview of Changes:")
-            st.dataframe(get_all_websites())
-        else:
-            st.warning("Enter a command.")
-    
-    st.subheader("Suggested Commands")
-    st.write("- Change currency of Website A to USD")
-    st.write("- Increase ticket size by 20% on all gaming websites")
-    st.write("- Preview price changes before publishing")
+            success = parse_and_prepare(command)
+            if success:
+                return redirect(url_for('preview'))
+            else:
+                message = "I didn't understand that command. Try one of the examples."
 
-elif page == "History & Logs":
-    st.header("Change History")
-    df_changes = get_changes()
-    if not df_changes.empty:
-        st.dataframe(df_changes)
-        # Rollback simulation
-        rollback_id = st.selectbox("Select Change ID to Rollback", df_changes['id'])
-        if st.button("Rollback"):
-            change = df_changes[df_changes['id'] == rollback_id].iloc[0]
-            # Parse action to revert (simplified)
-            if "currency" in change['action']:
-                update_website(change['website_id'], 'currency', change['old_value'])
-            st.success("Rollback applied.")
-    else:
-        st.write("No changes logged yet.")
+    return render_template('dashboard.html', websites=websites, message=message)
+
+# Simple login (for demo)
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if request.form['password'] == 'admin':  # change this!
+            session['logged_in'] = True
+            return redirect(url_for('dashboard'))
+        flash('Wrong password')
+    return render_template('login.html')
+
+# Add website
+@app.route('/add', methods=['GET', 'POST'])
+def add_website():
+    if request.method == 'POST':
+        global website_id_counter
+        name = request.form['name'].strip()
+        if any(w['name'].lower() == name.lower() for w in websites):
+            flash('Website name already exists')
+        else:
+            new_site = {
+                'id': website_id_counter,
+                'name': name,
+                'url': request.form['url'],
+                'type': request.form['type'],
+                'currency': request.form['currency'],
+                'ticket_size': float(request.form['ticket_size'] or 0),
+                'region': request.form['region'],
+                'language': request.form['language']
+            }
+            websites.append(new_site)
+            website_id_counter += 1
+            return redirect(url_for('dashboard'))
+    return render_template('add_website.html')
+
+# Command parsing – simple but handles the required examples
+def parse_and_prepare(command):
+    global pending_changes
+    pending_changes = {}
+    cmd = command.lower()
+
+    # 1. Change currency of specific website
+    if 'change currency of' in cmd and 'to' in cmd:
+        parts = command.split()
+        try:
+            name = parts[parts.index('of') + 1 : parts.index('to')][0]
+            new_curr = parts[parts.index('to') + 1].upper()
+            site = next((w for w in websites if w['name'].lower() == name.lower()), None)
+            if site and new_curr in ['USD', 'EUR', 'INR']:
+                rate = get_rate(site['currency'], new_curr)
+                new_price = site['ticket_size'] * rate
+                pending_changes[site['id']] = {
+                    'currency': new_curr,
+                    'ticket_size': round(new_price, 2)
+                }
+                return True
+        except:
+            pass
+
+    # 2. Increase ticket size by % on all of a type
+    match = re.search(r'increase ticket size by (\d+)% on all (\w+) websites', cmd)
+    if match:
+        percent = int(match.group(1)) / 100 + 1
+        wtype = match.group(2).lower()
+        for site in websites:
+            if site['type'].lower() == wtype:
+                new_price = site['ticket_size'] * percent
+                pending_changes[site['id']] = {
+                    'currency': site['currency'],
+                    'ticket_size': round(new_price, 2)
+                }
+        return bool(pending_changes)
+
+    # 3. Currency conversion on all (or "selected" = all for simplicity)
+    if 'apply inr to eur conversion' in cmd or 'apply' in cmd and 'conversion' in cmd:
+        for site in websites:
+            if site['currency'] == 'INR':
+                rate = get_rate('INR', 'EUR')
+                pending_changes[site['id']] = {
+                    'currency': 'EUR',
+                    'ticket_size': round(site['ticket_size'] * rate, 2)
+                }
+        return bool(pending_changes)
+
+    return False
+
+@app.route('/preview')
+def preview():
+    if not pending_changes:
+        return redirect(url_for('dashboard'))
+    
+    changes_list = []
+    for wid, change in pending_changes.items():
+        site = next(w for w in websites if w['id'] == wid)
+        changes_list.append({
+            'site': site,
+            'old_currency': site['currency'],
+            'new_currency': change['currency'],
+            'old_price': site['ticket_size'],
+            'new_price': change['ticket_size']
+        })
+    return render_template('preview.html', changes=changes_list)
+
+@app.route('/apply')
+def apply_changes():
+    global pending_changes, history
+    if not pending_changes:
+        return redirect(url_for('dashboard'))
+
+    applied = []
+    for wid, change in pending_changes.items():
+        site = next(w for w in websites if w['id'] == wid)
+        old = {'currency': site['currency'], 'ticket_size': site['ticket_size']}
+        site['currency'] = change['currency']
+        site['ticket_size'] = change['ticket_size']
+        applied.append({'site': site['name'], 'old': old, 'new': change})
+    
+    history.append({
+        'time': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'command': session.get('last_command', 'Unknown'),
+        'changes': applied
+    })
+    pending_changes = {}
+    return redirect(url_for('dashboard'))
+
+@app.route('/cancel')
+def cancel():
+    global pending_changes
+    pending_changes = {}
+    return redirect(url_for('dashboard'))
+
+@app.route('/history')
+def history():
+    return render_template('history.html', history=history)
+
+if __name__ == '__main__':
+    app.run(debug=True)
